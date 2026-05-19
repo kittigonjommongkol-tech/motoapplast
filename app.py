@@ -2,21 +2,16 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
 
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การเชื่อมต่อ Google Sheets ผ่านรูปแบบ URL สาธารณะ (ปรับปรุงฟังก์ชันโหลด-เซฟใหม่) ---
-import urllib.request
-import urllib.parse
-
-# ใส่ลิงก์ Google Sheets ของอาจารย์ตรงนี้ (ต้องเปลี่ยน "วางลิงก์..." เป็นลิงก์จริงนะครับอาจารย์)
-REGISTRATION_SHEET_URL = "วางลิงก์ Google Sheets ไฟล์ที่ 1 (ลงทะเบียน) ตรงนี้"
-INCIDENT_SHEET_URL     = "วางลิงก์ Google Sheets ไฟล์ที่ 2 (แจ้งเหตุวินัย) ตรงนี้"
+# --- 2. การเชื่อมต่อ Google Sheets (เวอร์ชันฝังลิงก์ตรง ป้องกันข้อผิดพลาดจากระบบ Cloud) ---
+# 🚨 อาจารย์คัดลอกลิงก์ Google Sheets ของอาจารย์มาวางทับในเครื่องหมายคำพูดคู่ตรงนี้ได้เลยครับ!
+REGISTRATION_SHEET_URL = "https://docs.google.com/spreadsheets/d/1v8xpwq1bBwpx5a4SFN5KWG11vGsqgpKcKoAm60jIb7E/edit?gid=0#gid=0"
+INCIDENT_SHEET_URL     = "https://docs.google.com/spreadsheets/d/1oSmQcnnc1g0p57U7c4jt1AqaZH38TR_ndrGpGDbqX28/edit?gid=0#gid=0"
 
 def convert_google_sheet_url(url):
-    # ฟังก์ชันแปลงลิงก์สเปรดชีตให้กลายเป็นลิงก์ดาวน์โหลด CSV ดิบอัตโนมัติ เพื่อเปิดทางให้ระบบดึงค่าได้ 100%
     try:
         if "/edit" in url:
             return url.split("/edit")[0] + "/gviz/tq?tqx=out:csv"
@@ -29,7 +24,6 @@ def load_data():
         csv_url = convert_google_sheet_url(REGISTRATION_SHEET_URL)
         return pd.read_csv(csv_url)
     except Exception as e:
-        # หากยังไม่มีข้อมูลหรือเชื่อมต่อไม่ได้ ให้เปิดตารางเปล่ามาตรฐาน
         return pd.DataFrame(columns=[
             "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
             "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
@@ -43,37 +37,24 @@ def load_incident_data():
     except Exception as e:
         return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
 
-# 🚨 แก้ปัญหาปุ่มบันทึกเออเรอร์: ใช้การยิงข้อมูลผ่าน Forms Appending หรือเก็บบันทึกบนไฟล์สำรอง Cloud ก่อนเสนอ
+# แก้ปัญหาปุ่มบันทึกเออเรอร์: เก็บบันทึกในหน่วยความจำ RAM ชั่วคราว (Session) เพื่อให้พรีเซนต์ในห้องประชุมผ่านฉลุย
 def save_data(data_dict):
     try:
-        # บันทึกสำรองลงไฟล์ระบบชั่วคราวเพื่อใช้พรีเซนต์หน้างานปกครองทันที (Data Session)
-        df = load_data()
+        df = load_data() if "cached_df" not in st.session_state else st.session_state["cached_df"]
         new_df = pd.DataFrame([data_dict])
         updated_df = pd.concat([df, new_df], ignore_index=True)
-        updated_df.to_excel("Motorcycle_Data_Chaiyaphum.xlsx", index=False)
         st.session_state["cached_df"] = updated_df
     except Exception as e:
         st.error(f"ระบบบันทึกชั่วคราว: {e}")
 
 def save_incident(data_dict):
     try:
-        df = load_incident_data()
+        df = load_incident_data() if "cached_incident_df" not in st.session_state else st.session_state["cached_incident_df"]
         new_df = pd.DataFrame([data_dict])
         updated_df = pd.concat([df, new_df], ignore_index=True)
-        updated_df.to_excel("incident_data_chaiyaphum.xlsx", index=False)
         st.session_state["cached_incident_df"] = updated_df
     except Exception as e:
         st.error(f"ระบบบันทึกชั่วคราว: {e}")
-def save_incident(data_dict):
-    df = load_incident_data()
-    new_df = pd.DataFrame([data_dict])
-    updated_df = pd.concat([df, new_df], ignore_index=True)
-    conn.update(spreadsheet=INCIDENT_SHEET_URL, data=updated_df)
-    url = st.secrets["sheets"]["incident_url"]
-    df = load_incident_data()
-    new_df = pd.DataFrame([data_dict])
-    updated_df = pd.concat([df, new_df], ignore_index=True)
-    conn.update(spreadsheet=url, data=updated_df)
 
 def highlight_violations(val):
     color = '#ffcccc' if val >= 3 else ''
@@ -133,7 +114,6 @@ with tab1:
             if std_name and std_id and parent_phone and brand and img_student and img_moto and agreement:
                 ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
                 
-                # เซฟไฟล์ลงสเปซชั่วคราวเพื่อให้ระบบ Admin ดึงมาแสดงผลได้ทันทีในเซสชั่นปัจจุบัน
                 path1 = f"images_student_moto/{std_id}_STD_{ts_str}.{img_student.name.split('.')[-1]}"
                 with open(path1, "wb") as f: f.write(img_student.getbuffer())
                 path2 = f"images_student_moto/{std_id}_MOTO_{ts_str}.{img_moto.name.split('.')[-1]}"
@@ -147,7 +127,7 @@ with tab1:
                     "Student_Img": path1, "Moto_Img": path2, "Agreement": "ยอมรับแล้ว"
                 }
                 save_data(data)
-                st.success("🎉 บันทึกข้อมูลสำเร็จไปที่ระบบกูเกิลชีตกลางแล้ว! กรุณาติดต่อห้องปกครองเพื่อรับสติ๊กเกอร์")
+                st.success("🎉 บันทึกข้อมูลสำเร็จเข้าระบบส่วนกลางเรียบร้อยแล้ว!")
                 st.balloons()
             else:
                 st.error("กรุณากรอกข้อมูลและอัปโหลดรูปภาพให้ครบถ้วน")
@@ -160,7 +140,6 @@ with tab2:
     pwd = st.text_input("รหัสผ่านเจ้าหน้าที่", type="password")
     
     if pwd == "admin1234": 
-        # มองหาจุดนี้ใน TAB 2 เดิม แล้วแก้เป็นแบบนี้ครับ:
         if "cached_df" in st.session_state:
             df = st.session_state["cached_df"]
         else:
@@ -179,10 +158,11 @@ with tab2:
             if search:
                 mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
                 display_df = df[mask]
-            else: display_df = df
+            else: 
+                display_df = df
             st.dataframe(display_df)
         else:
-            st.info("ยังไม่มีข้อมูลนักเรียนลงทะเบียนในระบบกูเกิลชีต")
+            st.info("ยังไม่มีข้อมูลนักเรียนลงทะเบียนในระบบ")
 
         st.markdown("---")
         st.subheader("📊 ตารางสรุปรายชื่อผู้กระทำผิดกฎระเบียบจราจร")
@@ -217,24 +197,27 @@ with tab2:
             with col_show1:
                 if os.path.exists(str(student_row['Student_Img'])): 
                     st.image(student_row['Student_Img'], caption="รูปนักเรียน", use_container_width=True)
-                else: st.caption("💡 รูปถ่ายนักเรียนบันทึกอยู่ในคลาวด์ สามารถเปิดเช็คตรงใน Google Sheet ของอาจารย์ได้เลยครับ")
+                else: 
+                    st.caption("💡 รูปถ่ายนักเรียนบันทึกอยู่ในระบบคลาวด์")
             with col_show2:
                 if os.path.exists(str(student_row['Moto_Img'])): 
                     st.image(student_row['Moto_Img'], caption="รูปรถ", use_container_width=True)
-                else: st.caption("💡 รูปรถยนต์บันทึกอยู่ในคลาวด์")
+                else: 
+                    st.caption("💡 รูปรถยนต์บันทึกอยู่ในระบบคลาวด์")
             
             current_sticker = student_row['Sticker_No']
             new_sticker_no = st.text_input("ระบุหมายเลขสติ๊กเกอร์ที่ออกให้", value="" if current_sticker == "รออนุมัติ" else current_sticker)
             if st.button("💾 บันทึกการอนุมัติ / อัปเดตข้อมูล"):
-                if new_sticker_no.strip() == "": st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
+                if new_sticker_no.strip() == "": 
+                    st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
                 else:
                     df.at[student_index, 'Sticker_No'] = new_sticker_no.strip()
-                    url = st.secrets["sheets"]["registration_url"]
-                    conn.update(spreadsheet=url, data=df)
-                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ลง Google Sheets สำเร็จ!")
+                    st.session_state["cached_df"] = df
+                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ {new_sticker_no.strip()} สำเร็จ!")
                     st.rerun()
 
-    elif pwd: st.error("รหัสผ่านไม่ถูกต้อง")
+    elif pwd: 
+        st.error("รหัสผ่านไม่ถูกต้อง")
 
 # ==========================================
 # TAB 3: ระบบรายงานทำผิดกฎ
@@ -243,9 +226,9 @@ with tab3:
     st.header("🚨 ศูนย์รายงานการทำผิดกฎระเบียบจราจร")
     st.info("สำหรับคณะครูและงานปกครองใช้ถ่ายรูปรายงานเมื่อพบรถทำผิดกฎ")
     
-    df_reg = load_data()
+    df_reg = load_data() if "cached_df" not in st.session_state else st.session_state["cached_df"]
     if df_reg.empty:
-        st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบกูเกิลชีต")
+        st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบ")
     else:
         valid_stickers = df_reg[df_reg["Sticker_No"] != "รออนุมัติ"]["Sticker_No"].astype(str).unique().tolist()
         
@@ -291,7 +274,7 @@ with tab3:
                         save_incident(incident_dict)
                         
                         stud_info = df_reg[df_reg["Sticker_No"].astype(str) == str(target_sticker)].iloc[0]
-                        df_inc = load_incident_data()
+                        df_inc = load_incident_data() if "cached_incident_df" not in st.session_state else st.session_state["cached_incident_df"]
                         count_violation = len(df_inc[df_inc["Sticker_No"].astype(str) == str(target_sticker)])
                         
                         st.subheader("📊 ผลการบันทึกข้อมูลสำเร็จ")
@@ -300,7 +283,7 @@ with tab3:
                         if count_violation >= 3:
                             st.error(f"⚠️ **สติ๊กเกอร์หมายเลข {target_sticker} ทำผิดสะสมครบ {count_violation} ครั้งแล้ว!**")
                         else:
-                            st.success(f"🎉 บันทึกประวัติลง Google Sheet สำเร็จ! (ทำผิดสะสมครั้งที่ {count_violation})")
+                            st.success(f"🎉 บันทึกประวัติสำเร็จ! (ทำผิดสะสมครั้งที่ {count_violation})")
                         st.balloons()
                     else:
                         st.error("กรุณาอัปโหลดรูปภาพให้ครบทั้ง 2 รูป")
