@@ -161,13 +161,13 @@ with tab2:
     
     if pwd == "admin1234": 
         # มองหาจุดนี้ใน TAB 2 เดิม แล้วแก้เป็นแบบนี้ครับ:
-if "cached_df" in st.session_state:
-    df = st.session_state["cached_df"]
-else:
+        if "cached_df" in st.session_state:
+            df = st.session_state["cached_df"]
+        else:
     df = load_data()
 
-if "cached_incident_df" in st.session_state:
-    df_inc = st.session_state["cached_incident_df"]
+        if "cached_incident_df" in st.session_state:
+            df_inc = st.session_state["cached_incident_df"]
 else:
     df_inc = load_incident_data()
         df_inc = load_incident_data()
