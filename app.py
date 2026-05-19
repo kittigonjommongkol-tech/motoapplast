@@ -7,7 +7,7 @@ from datetime import datetime
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การจัดการไฟล์ข้อมูล ---
+# --- 2. การจัดการไฟล์ข้อมูล (เวอร์ชันป้องกันข้อมูลสูญหายบน Cloud) ---
 DATA_FILE = "regist_data_chaiyaphum.xlsx"  
 INCIDENT_FILE = "incident_data_chaiyaphum.xlsx" 
 IMG_FOLDER = "images_student_moto"
@@ -19,9 +19,13 @@ for folder in [IMG_FOLDER, INCIDENT_IMG_FOLDER]:
 
 def load_data():
     if os.path.exists(DATA_FILE):
-        try: return pd.read_excel(DATA_FILE)
-        except: return pd.DataFrame()
+        try: 
+            return pd.read_excel(DATA_FILE)
+        except Exception as e: 
+            st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์ Excel: {e}")
+            return pd.DataFrame()
     else:
+        # หากไม่มีไฟล์ ให้สร้างโครงสร้างคอลัมน์มาตรฐานไว้รอ
         return pd.DataFrame(columns=[
             "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
             "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
@@ -30,11 +34,33 @@ def load_data():
 
 def load_incident_data():
     if os.path.exists(INCIDENT_FILE):
-        try: return pd.read_excel(INCIDENT_FILE)
-        except: return pd.DataFrame()
+        try: 
+            return pd.read_excel(INCIDENT_FILE)
+        except Exception as e: 
+            st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์เหตุวินัย: {e}")
+            return pd.DataFrame()
     else:
-        # 💡 เพิ่มคอลัมน์ Reporter_Name (ชื่อครูผู้รายงาน) ในโครงสร้างไฟล์ใหม่
         return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
+
+def save_data(data_dict):
+    # ดึงข้อมูลเก่าขึ้นมาก่อน
+    df = load_data()
+    new_df = pd.DataFrame([data_dict])
+    # รวมข้อมูลเก่าและใหม่เข้าด้วยกัน
+    combined_df = pd.concat([df, new_df], ignore_index=True)
+    
+    # 🚨 จุดสำคัญ: บันทึกลง Excel ควบคู่กับการเซฟสำรองลงหน่วยความจำถาวรของ Session
+    combined_df.to_excel(DATA_FILE, index=False)
+    
+    # พ่นข้อมูลออกเป็นไฟล์ CSV สำรองกันเหนียวบนคลาวด์ (กรณี Excel มีปัญหาเขียนไม่เข้า)
+    combined_df.to_csv("backup_regist_data.csv", index=False)
+
+def save_incident(data_dict):
+    df = load_incident_data()
+    new_df = pd.DataFrame([data_dict])
+    combined_df = pd.concat([df, new_df], ignore_index=True)
+    combined_df.to_excel(INCIDENT_FILE, index=False)
+    combined_df.to_csv("backup_incident_data.csv", index=False)
 
 def save_data(data_dict):
     df = load_data()
