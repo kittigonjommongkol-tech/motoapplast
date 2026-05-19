@@ -164,13 +164,12 @@ with tab2:
         if "cached_df" in st.session_state:
             df = st.session_state["cached_df"]
         else:
-    df = load_data()
+            df = load_data()
 
         if "cached_incident_df" in st.session_state:
             df_inc = st.session_state["cached_incident_df"]
-else:
-    df_inc = load_incident_data()
-        df_inc = load_incident_data()
+        else:
+            df_inc = load_incident_data()
         
         st.metric("จำนวนรถที่ลงทะเบียนทั้งหมด (Realtime)", f"{len(df)} คัน")
         
