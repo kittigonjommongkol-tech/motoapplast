@@ -7,35 +7,40 @@ from streamlit_gsheets import GSheetsConnection
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การเชื่อมต่อ Google Sheets ผ่าน st.connection ---
-# หมายเหตุ: ระบบจะดึง URL จากหน้า Settings -> Secrets อัตโนมัติ ป้องกันข้อมูลสูญหาย 100%
+# --- 2. การเชื่อมต่อ Google Sheets (เวอร์ชันฝังลิงก์ตรง ป้องกันข้อผิดพลาดจากระบบ Cloud) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 🚨 อาจารย์คัดลอกลิงก์ Google Sheets ของอาจารย์มาวางทับในเครื่องหมายคำพูดตรงนี้ได้เลยครับ!
+REGISTRATION_SHEET_URL = "วางลิงก์ Google Sheets ไฟล์ที่ 1 (ลงทะเบียน) ตรงนี้"
+INCIDENT_SHEET_URL     = "วางลิงก์ Google Sheets ไฟล์ที่ 2 (แจ้งเหตุวินัย) ตรงนี้"
 
 def load_data():
     try:
-        url = st.secrets["sheets"]["registration_url"]
-        return conn.read(spreadsheet=url, ttl="0d") # ttl="0d" เพื่อให้ดึงข้อมูลใหม่ล่าสุดเสมอ ไม่เก็บแคช
+        # ดึงข้อมูลจากลิงก์ที่ฝังไว้โดยตรง
+        return conn.read(spreadsheet=REGISTRATION_SHEET_URL, ttl="0d")
     except Exception as e:
         st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางลงทะเบียนได้: {e}")
         return pd.DataFrame()
 
 def load_incident_data():
     try:
-        url = st.secrets["sheets"]["incident_url"]
-        return conn.read(spreadsheet=url, ttl="0d")
+        return conn.read(spreadsheet=INCIDENT_SHEET_URL, ttl="0d")
     except Exception as e:
         st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางบันทึกวินัยได้: {e}")
         return pd.DataFrame()
 
 def save_data(data_dict):
-    url = st.secrets["sheets"]["registration_url"]
     df = load_data()
     new_df = pd.DataFrame([data_dict])
     updated_df = pd.concat([df, new_df], ignore_index=True)
-    # อัปเดตข้อมูลกลับไปยัง Google Sheets ส่วนกลางทันที
-    conn.update(spreadsheet=url, data=updated_df)
+    # สั่งอัปเดตกลับไปยังลิงก์ตรงทันที
+    conn.update(spreadsheet=REGISTRATION_SHEET_URL, data=updated_df)
 
 def save_incident(data_dict):
+    df = load_incident_data()
+    new_df = pd.DataFrame([data_dict])
+    updated_df = pd.concat([df, new_df], ignore_index=True)
+    conn.update(spreadsheet=INCIDENT_SHEET_URL, data=updated_df)
     url = st.secrets["sheets"]["incident_url"]
     df = load_incident_data()
     new_df = pd.DataFrame([data_dict])
