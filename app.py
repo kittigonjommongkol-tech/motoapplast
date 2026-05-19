@@ -1,92 +1,73 @@
 import streamlit as st
 import pandas as pd
 import os
-import requests
 from datetime import datetime
 
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. ที่อยู่สำหรับการเชื่อมต่อข้อมูล (ฝังลิงก์ตรงถาวร) ---
-# 🚨 1. อาจารย์นำลิงก์ Google Sheets (แชร์แบบทุกคนที่มีลิงก์เป็นผู้แก้ไข) มาวางตรงนี้เพื่อใช้ "อ่านข้อมูล" โชว์บนแอป
-REGISTRATION_SHEET_URL = "https://docs.google.com/spreadsheets/d/1v8xpwq1bBwpx5a4SFN5KWG11vGsqgpKcKoAm60jIb7E/edit?gid=0#gid=0"
-INCIDENT_SHEET_URL     = "https://docs.google.com/spreadsheets/d/1oSmQcnnc1g0p57U7c4jt1AqaZH38TR_ndrGpGDbqX28/edit?gid=0#gid=0"
+# --- 2. ตั้งชื่อไฟล์ Excel สำหรับบันทึกข้อมูลถาวรภายในแอป ---
+REGISTRATION_FILE = "Database_Registration_Chaiyaphum.xlsx"
+INCIDENT_FILE     = "Database_Incident_Chaiyaphum.xlsx"
 
-# 🚨 2. อาจารย์นำลิงก์ Web App ที่ได้จาก Google Apps Script (สเต็ปที่ 2 ของการตั้งค่าในชีต) มาวางตรงนี้เพื่อใช้ "บันทึกข้อมูลถาวร"
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby7Sk0BYcyMkrMk3FJbq2w4Phcz5uqfaU4aOwVm9920jhcZYyu7YfvSmj4V_wHEfYWX/exec"
-
-def convert_google_sheet_url(url):
-    try:
-        if "/edit" in url:
-            return url.split("/edit")[0] + "/gviz/tq?tqx=out:csv"
-        return url
-    except:
-        return url
+# โครงสร้างตารางมาตรฐานกรณีที่ยังไม่มีการกรอกข้อมูลใดๆ
+REG_COLUMNS = [
+    "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
+    "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
+    "Student_Img", "Moto_Img", "Agreement"
+]
+INC_COLUMNS = ["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"]
 
 def load_data():
-    try:
-        csv_url = convert_google_sheet_url(REGISTRATION_SHEET_URL)
-        return pd.read_csv(csv_url)
-    except Exception as e:
-        return pd.DataFrame(columns=[
-            "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
-            "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
-            "Student_Img", "Moto_Img", "Agreement"
-        ])
+    """ฟังก์ชันโหลดข้อมูลจากไฟล์ Excel บนตัวแอป"""
+    if os.path.exists(REGISTRATION_FILE):
+        try:
+            return pd.read_excel(REGISTRATION_FILE)
+        except:
+            return pd.DataFrame(columns=REG_COLUMNS)
+    else:
+        return pd.DataFrame(columns=REG_COLUMNS)
 
 def load_incident_data():
-    try:
-        csv_url = convert_google_sheet_url(INCIDENT_SHEET_URL)
-        return pd.read_csv(csv_url)
-    except Exception as e:
-        return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
+    """ฟังก์ชันโหลดข้อมูลแจ้งเหตุจากไฟล์ Excel บนตัวแอป"""
+    if os.path.exists(INCIDENT_FILE):
+        try:
+            return pd.read_excel(INCIDENT_FILE)
+        except:
+            return pd.DataFrame(columns=INC_COLUMNS)
+    else:
+        return pd.DataFrame(columns=INC_COLUMNS)
 
-# ฟังก์ชันบันทึกข้อมูลถาวร ยิงตรงเข้าประตูหลังบ้าน Google Sheets
 def save_data(data_dict):
-    try:
-        payload = {
-            "sheet_name": "Sheet1", # 💡 ตรวจสอบให้ตรงกับชื่อแท็บสเปรดชีตลงทะเบียนของอาจารย์นะครับ (ปกติคือ Sheet1 หรือ แผ่น1)
-            "row_data": [
-                data_dict["Timestamp"], data_dict["Sticker_No"], data_dict["Student_ID"], 
-                data_dict["Name"], data_dict["Level"], data_dict["Department"], data_dict["Phone"],
-                data_dict["Parent_Name"], data_dict["Relation"], data_dict["Parent_Phone"],
-                data_dict["Brand"], data_dict["Model"], data_dict["Plate_No"], data_dict["Color"],
-                data_dict["Student_Img"], data_dict["Moto_Img"], data_dict["Agreement"]
-            ]
-        }
-        requests.post(APPS_SCRIPT_URL, json=payload)
-        
-        # อัปเดตตารางหน้าจอจำลองเพื่อให้ข้อมูลเด้งขึ้นตารางทันทีในตารันปัจจุบัน
-        df = load_data() if "cached_df" not in st.session_state else st.session_state["cached_df"]
-        new_df = pd.DataFrame([data_dict])
-        st.session_state["cached_df"] = pd.concat([df, new_df], ignore_index=True)
-    except Exception as e:
-        st.error(f"⚠️ บันทึกลง Google Sheets ไม่สำเร็จ แต่ระบบจำลองบนเว็บทำงานต่อได้: {e}")
+    """ฟังก์ชันบันทึกข้อมูลลงไฟล์ Excel และอัปเดตระบบจำลอง"""
+    df = load_data()
+    new_df = pd.DataFrame([data_dict])
+    updated_df = pd.concat([df, new_df], ignore_index=True)
+    
+    # สั่งเซฟลงไฟล์ Excel ในตัวแอปถาวร
+    updated_df.to_excel(REGISTRATION_FILE, index=False)
+    # ล้างแรมหน้าเว็บให้จำค่าใหม่ทันที
+    st.session_state["cached_df"] = updated_df
 
 def save_incident(data_dict):
-    try:
-        payload = {
-            "sheet_name": "Sheet2", # 💡 ตรวจสอบให้ตรงกับชื่อแท็บสเปรดชีตแจ้งเหตุวินัยของอาจารย์นะครับ
-            "row_data": [
-                data_dict["Timestamp"], data_dict["Sticker_No"], data_dict["Violation_Type"],
-                data_dict["Details"], data_dict["Reporter_Name"], data_dict["Img_Sticker"], data_dict["Img_Overview"]
-            ]
-        }
-        requests.post(APPS_SCRIPT_URL, json=payload)
-        
-        df = load_incident_data() if "cached_incident_df" not in st.session_state else st.session_state["cached_incident_df"]
-        new_df = pd.DataFrame([data_dict])
-        st.session_state["cached_incident_df"] = pd.concat([df, new_df], ignore_index=True)
-    except Exception as e:
-        st.error(f"⚠️ บันทึกข้อมูลผิดกฎไม่สำเร็จ: {e}")
+    """ฟังก์ชันบันทึกข้อมูลแจ้งเหตุลงไฟล์ Excel และอัปเดตระบบจำลอง"""
+    df = load_incident_data()
+    new_df = pd.DataFrame([data_dict])
+    updated_df = pd.concat([df, new_df], ignore_index=True)
+    
+    # สั่งเซฟลงไฟล์ Excel ในตัวแอปถาวร
+    updated_df.to_excel(INCIDENT_FILE, index=False)
+    # ล้างแรมหน้าเว็บให้จำค่าใหม่ทันที
+    st.session_state["cached_incident_df"] = updated_df
 
 def highlight_violations(val):
     color = '#ffcccc' if val >= 3 else ''
     return f'background-color: {color}; font-weight: bold;'
 
-# สร้างโฟลเดอร์สำหรับเก็บภาพแบบชั่วคราว
+# สร้างโฟลเดอร์สำหรับเก็บภาพภายในแอป
 for folder in ["images_student_moto", "images_incidents"]:
-    if not os.path.exists(folder): os.makedirs(folder)
+    if not os.path.exists(folder): 
+        os.makedirs(folder)
 
 # --- 3. ส่วนแสดงผลหลัก ---
 st.image("https://www.vec.go.th/Portals/0/logo_vec.png", width=100) 
@@ -151,7 +132,7 @@ with tab1:
                     "Student_Img": path1, "Moto_Img": path2, "Agreement": "ยอมรับแล้ว"
                 }
                 save_data(data)
-                st.success("🎉 บันทึกข้อมูลสำเร็จถาวรลงระบบเรียบร้อยแล้ว!")
+                st.success("🎉 บันทึกข้อมูลลงฐานข้อมูลในระบบสำเร็จถาวรแล้ว!")
                 st.balloons()
             else:
                 st.error("กรุณากรอกข้อมูลและอัปโหลดรูปภาพให้ครบถ้วน")
@@ -222,12 +203,12 @@ with tab2:
                 if os.path.exists(str(student_row['Student_Img'])): 
                     st.image(student_row['Student_Img'], caption="รูปนักเรียน", use_container_width=True)
                 else: 
-                    st.caption("💡 รูปถ่ายนักเรียนบันทึกอยู่ในระบบคลาวด์")
+                    st.caption("💡 รูปถ่ายนักเรียน")
             with col_show2:
                 if os.path.exists(str(student_row['Moto_Img'])): 
                     st.image(student_row['Moto_Img'], caption="รูปรถ", use_container_width=True)
                 else: 
-                    st.caption("💡 รูปรถยนต์บันทึกอยู่ในระบบคลาวด์")
+                    st.caption("💡 รูปรถจักรยานยนต์")
             
             current_sticker = student_row['Sticker_No']
             new_sticker_no = st.text_input("ระบุหมายเลขสติ๊กเกอร์ที่ออกให้", value="" if current_sticker == "รออนุมัติ" else current_sticker)
@@ -236,19 +217,9 @@ with tab2:
                     st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
                 else:
                     df.at[student_index, 'Sticker_No'] = new_sticker_no.strip()
-                    
-                    # บันทึกค่าหมายเลขสติ๊กเกอร์ใหม่กลับเข้ากูเกิลชีตผ่าน Apps Script ถาวร
-                    payload = {
-                        "sheet_name": "Sheet1",
-                        "row_data": df.iloc[student_index].tolist()
-                    }
-                    try:
-                        requests.post(APPS_SCRIPT_URL, json=payload)
-                    except:
-                        pass
-                        
+                    df.to_excel(REGISTRATION_FILE, index=False)
                     st.session_state["cached_df"] = df
-                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ {new_sticker_no.strip()} สำเร็จ!")
+                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ {new_sticker_no.strip()} และบันทึกถาวรสำเร็จ!")
                     st.rerun()
 
     elif pwd: 
@@ -261,7 +232,7 @@ with tab3:
     st.header("🚨 ศูนย์รายงานการทำผิดกฎระเบียบจราจร")
     st.info("สำหรับคณะครูและงานปกครองใช้ถ่ายรูปรายงานเมื่อพบรถทำผิดกฎ")
     
-    df_reg = load_data() if "cached_df" not in st.session_state else st.session_state["cached_df"]
+    df_reg = load_data()
     if df_reg.empty:
         st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบ")
     else:
@@ -309,7 +280,7 @@ with tab3:
                         save_incident(incident_dict)
                         
                         stud_info = df_reg[df_reg["Sticker_No"].astype(str) == str(target_sticker)].iloc[0]
-                        df_inc = load_incident_data() if "cached_incident_df" not in st.session_state else st.session_state["cached_incident_df"]
+                        df_inc = load_incident_data()
                         count_violation = len(df_inc[df_inc["Sticker_No"].astype(str) == str(target_sticker)])
                         
                         st.subheader("📊 ผลการบันทึกข้อมูลสำเร็จ")
