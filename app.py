@@ -166,6 +166,19 @@ with tab2:
             else: 
                 display_df = df
             st.dataframe(display_df)
+            
+            # 📥 ปุ่มดาวน์โหลดไฟล์ข้อมูลลงทะเบียนแบบ Excel
+            try:
+                with open(REGISTRATION_FILE, "rb") as file:
+                    st.download_button(
+                        label="📥 ดาวน์โหลดไฟล์ข้อมูลลงทะเบียนทั้งหมด (Excel)",
+                        data=file,
+                        file_name=f"ข้อมูลลงทะเบียนรถ_วก_ชัยภูมิ_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_reg"
+                    )
+            except:
+                pass
         else:
             st.info("ยังไม่มีข้อมูลนักเรียนลงทะเบียนในระบบ")
 
@@ -184,112 +197,4 @@ with tab2:
             st.caption("💡 แถบสีแดงไฮไลต์ = ผู้ทำผิดกฎสะสมวิกฤตตั้งแต่ 3 ครั้งขึ้นไป")
             st.dataframe(summary_violation_df.style.map(highlight_violations, subset=["จำนวนครั้งที่ทำผิดสะสม"]))
 
-            st.subheader("📜 ประวัติบันทึกการแจ้งเหตุโดยละเอียด")
-            st.dataframe(df_inc[["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name"]])
-
-        if not df.empty:
-            st.markdown("---")
-            st.subheader("🛠️ ระบบตรวจอนุมัติและออกหมายเลขสติ๊กเกอร์")
-            student_list = df.apply(lambda row: f"{row['Student_ID']} - {row['Name']} ({row['Sticker_No']})", axis=1).tolist()
-            selected_student = st.selectbox("เลือกนักเรียนที่ต้องการตรวจสอบเพื่ออกหมายเลข", student_list)
-            selected_id = selected_student.split(" - ")[0]
-            
-            student_row = df[df["Student_ID"].astype(str) == selected_id].iloc[0]
-            student_index = df[df["Student_ID"].astype(str) == selected_id].index[0]
-            
-            st.write(f"**ระดับชั้น:** {student_row['Level']} | **แผนกวิชา:** {student_row['Department']}")
-            col_show1, col_show2 = st.columns(2)
-            with col_show1:
-                if os.path.exists(str(student_row['Student_Img'])): 
-                    st.image(student_row['Student_Img'], caption="รูปนักเรียน", use_container_width=True)
-                else: 
-                    st.caption("💡 รูปถ่ายนักเรียน")
-            with col_show2:
-                if os.path.exists(str(student_row['Moto_Img'])): 
-                    st.image(student_row['Moto_Img'], caption="รูปรถ", use_container_width=True)
-                else: 
-                    st.caption("💡 รูปรถจักรยานยนต์")
-            
-            current_sticker = student_row['Sticker_No']
-            new_sticker_no = st.text_input("ระบุหมายเลขสติ๊กเกอร์ที่ออกให้", value="" if current_sticker == "รออนุมัติ" else current_sticker)
-            if st.button("💾 บันทึกการอนุมัติ / อัปเดตข้อมูล"):
-                if new_sticker_no.strip() == "": 
-                    st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
-                else:
-                    df.at[student_index, 'Sticker_No'] = new_sticker_no.strip()
-                    df.to_excel(REGISTRATION_FILE, index=False)
-                    st.session_state["cached_df"] = df
-                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ {new_sticker_no.strip()} และบันทึกถาวรสำเร็จ!")
-                    st.rerun()
-
-    elif pwd: 
-        st.error("รหัสผ่านไม่ถูกต้อง")
-
-# ==========================================
-# TAB 3: ระบบรายงานทำผิดกฎ
-# ==========================================
-with tab3:
-    st.header("🚨 ศูนย์รายงานการทำผิดกฎระเบียบจราจร")
-    st.info("สำหรับคณะครูและงานปกครองใช้ถ่ายรูปรายงานเมื่อพบรถทำผิดกฎ")
-    
-    df_reg = load_data()
-    if df_reg.empty:
-        st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบ")
-    else:
-        valid_stickers = df_reg[df_reg["Sticker_No"] != "รออนุมัติ"]["Sticker_No"].astype(str).unique().tolist()
-        
-        if not valid_stickers:
-            st.warning("⚠️ ยังไม่มีหมายเลขสติ๊กเกอร์ที่ผ่านการอนุมัติในระบบ")
-        else:
-            with st.form("incident_form", clear_on_submit=True):
-                reporter_name = st.text_input("✍️ ชื่อ-นามสกุล ของอาจารย์ผู้รายงานความผิด")
-                target_sticker = st.selectbox("🎯 เลือกหมายเลขสติ๊กเกอร์ที่ทำผิดกฎ", valid_stickers)
-                violation_type = st.selectbox("⚠️ ข้อหาความผิด", [
-                    "จอดรถในพื้นที่ห้ามจอด / จอดไม่เป็นระเบียบ",
-                    "ไม่สวมหมวกนิรภัยเข้ามาในวิทยาลัย",
-                    "ขับรถเร็วเกินกำหนด / ขับขี่น่าหวาดเสียว",
-                    "ดัดแปลงสภาพรถ / ท่อไอเสียเสียงดังเกินเกณฑ์",
-                    "อื่นๆ (โปรดระบุในช่องคำอธิบาย)"
-                ])
-                details = st.text_area("📝 คำอธิบายเพิ่มเติม")
-                
-                col_up1, col_up2 = st.columns(2)
-                img_stick = col_up1.file_uploader("📸 1. รูปถ่ายให้เห็นเลขสติ๊กเกอร์ชัดเจน", type=["jpg", "png", "jpeg"])
-                img_over = col_up2.file_uploader("📸 2. รูปถ่ายพื้นที่โดยรวม / สภาพแวดล้อม", type=["jpg", "png", "jpeg"])
-                
-                btn_report = st.form_submit_button("🚨 ส่งรายงานพฤติกรรม")
-                
-                if btn_report:
-                    if reporter_name.strip() == "":
-                        st.error("กรุณากรอกชื่อ-นามสกุล ของอาจารย์ผู้รายงานก่อนส่งข้อมูลครับ")
-                    elif img_stick and img_over:
-                        ts_now = datetime.now()
-                        ts_str = ts_now.strftime("%Y%m%d_%H%M%S")
-                        
-                        p_stick = f"images_incidents/{target_sticker}_STICKER_{ts_str}.{img_stick.name.split('.')[-1]}"
-                        with open(p_stick, "wb") as f: f.write(img_stick.getbuffer())
-                        p_over = f"images_incidents/{target_sticker}_OVERVIEW_{ts_str}.{img_over.name.split('.')[-1]}"
-                        with open(p_over, "wb") as f: f.write(img_over.getbuffer())
-                        
-                        incident_dict = {
-                            "Timestamp": ts_now.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Sticker_No": target_sticker, "Violation_Type": violation_type,
-                            "Details": details, "Reporter_Name": reporter_name.strip(),
-                            "Img_Sticker": p_stick, "Img_Overview": p_over
-                        }
-                        save_incident(incident_dict)
-                        
-                        stud_info = df_reg[df_reg["Sticker_No"].astype(str) == str(target_sticker)].iloc[0]
-                        df_inc = load_incident_data()
-                        count_violation = len(df_inc[df_inc["Sticker_No"].astype(str) == str(target_sticker)])
-                        
-                        st.subheader("📊 ผลการบันทึกข้อมูลสำเร็จ")
-                        st.write(f"**ชื่อผู้ทำผิด:** {stud_info['Name']} ({stud_info['Level']})")
-                        
-                        if count_violation >= 3:
-                            st.error(f"⚠️ **สติ๊กเกอร์หมายเลข {target_sticker} ทำผิดสะสมครบ {count_violation} ครั้งแล้ว!**")
-                        else:
-                            st.success(f"🎉 บันทึกประวัติสำเร็จถาวร! (ทำผิดสะสมครั้งที่ {count_violation})")
-                        st.balloons()
-                    else:
-                        st.error("กรุณาอัปโหลดรูปภาพให้ครบทั้ง 2 รูป")
+            st.subheader("📜 ประ
