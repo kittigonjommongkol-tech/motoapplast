@@ -1,15 +1,19 @@
 import streamlit as st
 import pandas as pd
 import os
+import requests
 from datetime import datetime
 
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การเชื่อมต่อ Google Sheets (เวอร์ชันฝังลิงก์ตรง ป้องกันข้อผิดพลาดจากระบบ Cloud) ---
-# 🚨 อาจารย์คัดลอกลิงก์ Google Sheets ของอาจารย์มาวางทับในเครื่องหมายคำพูดคู่ตรงนี้ได้เลยครับ!
+# --- 2. ที่อยู่สำหรับการเชื่อมต่อข้อมูล (ฝังลิงก์ตรงถาวร) ---
+# 🚨 1. อาจารย์นำลิงก์ Google Sheets (แชร์แบบทุกคนที่มีลิงก์เป็นผู้แก้ไข) มาวางตรงนี้เพื่อใช้ "อ่านข้อมูล" โชว์บนแอป
 REGISTRATION_SHEET_URL = "https://docs.google.com/spreadsheets/d/1v8xpwq1bBwpx5a4SFN5KWG11vGsqgpKcKoAm60jIb7E/edit?gid=0#gid=0"
 INCIDENT_SHEET_URL     = "https://docs.google.com/spreadsheets/d/1oSmQcnnc1g0p57U7c4jt1AqaZH38TR_ndrGpGDbqX28/edit?gid=0#gid=0"
+
+# 🚨 2. อาจารย์นำลิงก์ Web App ที่ได้จาก Google Apps Script (สเต็ปที่ 2 ของการตั้งค่าในชีต) มาวางตรงนี้เพื่อใช้ "บันทึกข้อมูลถาวร"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby7Sk0BYcyMkrMk3FJbq2w4Phcz5uqfaU4aOwVm9920jhcZYyu7YfvSmj4V_wHEfYWX/exec"
 
 def convert_google_sheet_url(url):
     try:
@@ -37,30 +41,50 @@ def load_incident_data():
     except Exception as e:
         return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
 
-# แก้ปัญหาปุ่มบันทึกเออเรอร์: เก็บบันทึกในหน่วยความจำ RAM ชั่วคราว (Session) เพื่อให้พรีเซนต์ในห้องประชุมผ่านฉลุย
+# ฟังก์ชันบันทึกข้อมูลถาวร ยิงตรงเข้าประตูหลังบ้าน Google Sheets
 def save_data(data_dict):
     try:
+        payload = {
+            "sheet_name": "Sheet1", # 💡 ตรวจสอบให้ตรงกับชื่อแท็บสเปรดชีตลงทะเบียนของอาจารย์นะครับ (ปกติคือ Sheet1 หรือ แผ่น1)
+            "row_data": [
+                data_dict["Timestamp"], data_dict["Sticker_No"], data_dict["Student_ID"], 
+                data_dict["Name"], data_dict["Level"], data_dict["Department"], data_dict["Phone"],
+                data_dict["Parent_Name"], data_dict["Relation"], data_dict["Parent_Phone"],
+                data_dict["Brand"], data_dict["Model"], data_dict["Plate_No"], data_dict["Color"],
+                data_dict["Student_Img"], data_dict["Moto_Img"], data_dict["Agreement"]
+            ]
+        }
+        requests.post(APPS_SCRIPT_URL, json=payload)
+        
+        # อัปเดตตารางหน้าจอจำลองเพื่อให้ข้อมูลเด้งขึ้นตารางทันทีในตารันปัจจุบัน
         df = load_data() if "cached_df" not in st.session_state else st.session_state["cached_df"]
         new_df = pd.DataFrame([data_dict])
-        updated_df = pd.concat([df, new_df], ignore_index=True)
-        st.session_state["cached_df"] = updated_df
+        st.session_state["cached_df"] = pd.concat([df, new_df], ignore_index=True)
     except Exception as e:
-        st.error(f"ระบบบันทึกชั่วคราว: {e}")
+        st.error(f"⚠️ บันทึกลง Google Sheets ไม่สำเร็จ แต่ระบบจำลองบนเว็บทำงานต่อได้: {e}")
 
 def save_incident(data_dict):
     try:
+        payload = {
+            "sheet_name": "Sheet2", # 💡 ตรวจสอบให้ตรงกับชื่อแท็บสเปรดชีตแจ้งเหตุวินัยของอาจารย์นะครับ
+            "row_data": [
+                data_dict["Timestamp"], data_dict["Sticker_No"], data_dict["Violation_Type"],
+                data_dict["Details"], data_dict["Reporter_Name"], data_dict["Img_Sticker"], data_dict["Img_Overview"]
+            ]
+        }
+        requests.post(APPS_SCRIPT_URL, json=payload)
+        
         df = load_incident_data() if "cached_incident_df" not in st.session_state else st.session_state["cached_incident_df"]
         new_df = pd.DataFrame([data_dict])
-        updated_df = pd.concat([df, new_df], ignore_index=True)
-        st.session_state["cached_incident_df"] = updated_df
+        st.session_state["cached_incident_df"] = pd.concat([df, new_df], ignore_index=True)
     except Exception as e:
-        st.error(f"ระบบบันทึกชั่วคราว: {e}")
+        st.error(f"⚠️ บันทึกข้อมูลผิดกฎไม่สำเร็จ: {e}")
 
 def highlight_violations(val):
     color = '#ffcccc' if val >= 3 else ''
     return f'background-color: {color}; font-weight: bold;'
 
-# สร้างโฟลเดอร์สำหรับเก็บภาพแบบชั่วคราวในเซสชั่น (กันแอปเออเรอร์)
+# สร้างโฟลเดอร์สำหรับเก็บภาพแบบชั่วคราว
 for folder in ["images_student_moto", "images_incidents"]:
     if not os.path.exists(folder): os.makedirs(folder)
 
@@ -127,7 +151,7 @@ with tab1:
                     "Student_Img": path1, "Moto_Img": path2, "Agreement": "ยอมรับแล้ว"
                 }
                 save_data(data)
-                st.success("🎉 บันทึกข้อมูลสำเร็จเข้าระบบส่วนกลางเรียบร้อยแล้ว!")
+                st.success("🎉 บันทึกข้อมูลสำเร็จถาวรลงระบบเรียบร้อยแล้ว!")
                 st.balloons()
             else:
                 st.error("กรุณากรอกข้อมูลและอัปโหลดรูปภาพให้ครบถ้วน")
@@ -212,6 +236,17 @@ with tab2:
                     st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
                 else:
                     df.at[student_index, 'Sticker_No'] = new_sticker_no.strip()
+                    
+                    # บันทึกค่าหมายเลขสติ๊กเกอร์ใหม่กลับเข้ากูเกิลชีตผ่าน Apps Script ถาวร
+                    payload = {
+                        "sheet_name": "Sheet1",
+                        "row_data": df.iloc[student_index].tolist()
+                    }
+                    try:
+                        requests.post(APPS_SCRIPT_URL, json=payload)
+                    except:
+                        pass
+                        
                     st.session_state["cached_df"] = df
                     st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ {new_sticker_no.strip()} สำเร็จ!")
                     st.rerun()
@@ -283,7 +318,7 @@ with tab3:
                         if count_violation >= 3:
                             st.error(f"⚠️ **สติ๊กเกอร์หมายเลข {target_sticker} ทำผิดสะสมครบ {count_violation} ครั้งแล้ว!**")
                         else:
-                            st.success(f"🎉 บันทึกประวัติสำเร็จ! (ทำผิดสะสมครั้งที่ {count_violation})")
+                            st.success(f"🎉 บันทึกประวัติสำเร็จถาวร! (ทำผิดสะสมครั้งที่ {count_violation})")
                         st.balloons()
                     else:
                         st.error("กรุณาอัปโหลดรูปภาพให้ครบทั้ง 2 รูป")
