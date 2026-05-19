@@ -8,7 +8,7 @@ from datetime import datetime
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
 # --- 2. การจัดการไฟล์ข้อมูล (เวอร์ชันป้องกันข้อมูลสูญหายบน Cloud) ---
-DATA_FILE = "regist_data_chaiyaphum.xlsx"  
+DATA_FILE = "Motorcycle_Data_Chaiyaphum.xlsx"  
 INCIDENT_FILE = "incident_data_chaiyaphum.xlsx" 
 IMG_FOLDER = "images_student_moto"
 INCIDENT_IMG_FOLDER = "images_incidents" 
