@@ -1,80 +1,54 @@
 import streamlit as st
 import pandas as pd
 import os
-from PIL import Image
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การจัดการไฟล์ข้อมูล (เวอร์ชันป้องกันข้อมูลสูญหายบน Cloud) ---
-DATA_FILE = "Motorcycle_Data_Chaiyaphum.xlsx"  
-INCIDENT_FILE = "incident_data_chaiyaphum.xlsx" 
-IMG_FOLDER = "images_student_moto"
-INCIDENT_IMG_FOLDER = "images_incidents" 
-
-for folder in [IMG_FOLDER, INCIDENT_IMG_FOLDER]:
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+# --- 2. การเชื่อมต่อ Google Sheets ผ่าน st.connection ---
+# หมายเหตุ: ระบบจะดึง URL จากหน้า Settings -> Secrets อัตโนมัติ ป้องกันข้อมูลสูญหาย 100%
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        try: 
-            return pd.read_excel(DATA_FILE)
-        except Exception as e: 
-            st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์ Excel: {e}")
-            return pd.DataFrame()
-    else:
-        # หากไม่มีไฟล์ ให้สร้างโครงสร้างคอลัมน์มาตรฐานไว้รอ
-        return pd.DataFrame(columns=[
-            "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
-            "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
-            "Student_Img", "Moto_Img", "Agreement"
-        ])
+    try:
+        url = st.secrets["sheets"]["registration_url"]
+        return conn.read(spreadsheet=url, ttl="0d") # ttl="0d" เพื่อให้ดึงข้อมูลใหม่ล่าสุดเสมอ ไม่เก็บแคช
+    except Exception as e:
+        st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางลงทะเบียนได้: {e}")
+        return pd.DataFrame()
 
 def load_incident_data():
-    if os.path.exists(INCIDENT_FILE):
-        try: 
-            return pd.read_excel(INCIDENT_FILE)
-        except Exception as e: 
-            st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์เหตุวินัย: {e}")
-            return pd.DataFrame()
-    else:
-        return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
+    try:
+        url = st.secrets["sheets"]["incident_url"]
+        return conn.read(spreadsheet=url, ttl="0d")
+    except Exception as e:
+        st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางบันทึกวินัยได้: {e}")
+        return pd.DataFrame()
 
 def save_data(data_dict):
-    # ดึงข้อมูลเก่าขึ้นมาก่อน
+    url = st.secrets["sheets"]["registration_url"]
     df = load_data()
     new_df = pd.DataFrame([data_dict])
-    # รวมข้อมูลเก่าและใหม่เข้าด้วยกัน
-    combined_df = pd.concat([df, new_df], ignore_index=True)
-    
-    # 🚨 จุดสำคัญ: บันทึกลง Excel ควบคู่กับการเซฟสำรองลงหน่วยความจำถาวรของ Session
-    combined_df.to_excel(DATA_FILE, index=False)
-    
-    # พ่นข้อมูลออกเป็นไฟล์ CSV สำรองกันเหนียวบนคลาวด์ (กรณี Excel มีปัญหาเขียนไม่เข้า)
-    combined_df.to_csv("backup_regist_data.csv", index=False)
+    updated_df = pd.concat([df, new_df], ignore_index=True)
+    # อัปเดตข้อมูลกลับไปยัง Google Sheets ส่วนกลางทันที
+    conn.update(spreadsheet=url, data=updated_df)
 
 def save_incident(data_dict):
+    url = st.secrets["sheets"]["incident_url"]
     df = load_incident_data()
     new_df = pd.DataFrame([data_dict])
-    combined_df = pd.concat([df, new_df], ignore_index=True)
-    combined_df.to_excel(INCIDENT_FILE, index=False)
-    combined_df.to_csv("backup_incident_data.csv", index=False)
-
-def save_data(data_dict):
-    df = load_data()
-    new_df = pd.DataFrame([data_dict])
-    pd.concat([df, new_df], ignore_index=True).to_excel(DATA_FILE, index=False)
-
-def save_incident(data_dict):
-    df = load_incident_data()
-    new_df = pd.DataFrame([data_dict])
-    pd.concat([df, new_df], ignore_index=True).to_excel(INCIDENT_FILE, index=False)
+    updated_df = pd.concat([df, new_df], ignore_index=True)
+    conn.update(spreadsheet=url, data=updated_df)
 
 def highlight_violations(val):
     color = '#ffcccc' if val >= 3 else ''
     return f'background-color: {color}; font-weight: bold;'
+
+# สร้างโฟลเดอร์สำหรับเก็บภาพแบบชั่วคราวในเซสชั่น (กันแอปเออเรอร์)
+for folder in ["images_student_moto", "images_incidents"]:
+    if not os.path.exists(folder): os.makedirs(folder)
 
 # --- 3. ส่วนแสดงผลหลัก ---
 st.image("https://www.vec.go.th/Portals/0/logo_vec.png", width=100) 
@@ -125,9 +99,11 @@ with tab1:
         if submitted:
             if std_name and std_id and parent_phone and brand and img_student and img_moto and agreement:
                 ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                path1 = f"{IMG_FOLDER}/{std_id}_STD_{ts_str}.{img_student.name.split('.')[-1]}"
+                
+                # เซฟไฟล์ลงสเปซชั่วคราวเพื่อให้ระบบ Admin ดึงมาแสดงผลได้ทันทีในเซสชั่นปัจจุบัน
+                path1 = f"images_student_moto/{std_id}_STD_{ts_str}.{img_student.name.split('.')[-1]}"
                 with open(path1, "wb") as f: f.write(img_student.getbuffer())
-                path2 = f"{IMG_FOLDER}/{std_id}_MOTO_{ts_str}.{img_moto.name.split('.')[-1]}"
+                path2 = f"images_student_moto/{std_id}_MOTO_{ts_str}.{img_moto.name.split('.')[-1]}"
                 with open(path2, "wb") as f: f.write(img_moto.getbuffer())
 
                 data = {
@@ -138,10 +114,10 @@ with tab1:
                     "Student_Img": path1, "Moto_Img": path2, "Agreement": "ยอมรับแล้ว"
                 }
                 save_data(data)
-                st.success("🎉 บันทึกข้อมูลสำเร็จ! กรุณาติดต่อห้องปกครองเพื่อรับสติ๊กเกอร์")
+                st.success("🎉 บันทึกข้อมูลสำเร็จไปที่ระบบกูเกิลชีตกลางแล้ว! กรุณาติดต่อห้องปกครองเพื่อรับสติ๊กเกอร์")
                 st.balloons()
             else:
-                st.error("กรุณากรอกข้อมูลให้ครบถ้วน")
+                st.error("กรุณากรอกข้อมูลและอัปโหลดรูปภาพให้ครบถ้วน")
 
 # ==========================================
 # TAB 2: สำหรับงานปกครอง (Admin)
@@ -154,15 +130,18 @@ with tab2:
         df = load_data()
         df_inc = load_incident_data()
         
-        st.metric("จำนวนรถที่ลงทะเบียนทั้งหมด", f"{len(df)} คัน")
+        st.metric("จำนวนรถที่ลงทะเบียนทั้งหมด (Realtime)", f"{len(df)} คัน")
         
         st.subheader("📋 ตารางข้อมูลการลงทะเบียนสติ๊กเกอร์รถ")
         search = st.text_input("🔍 ค้นหาในตาราง (ชื่อ, ทะเบียน, รหัสสติ๊กเกอร์)")
-        if search:
-            mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
-            display_df = df[mask]
-        else: display_df = df
-        st.dataframe(display_df)
+        if not df.empty:
+            if search:
+                mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)
+                display_df = df[mask]
+            else: display_df = df
+            st.dataframe(display_df)
+        else:
+            st.info("ยังไม่มีข้อมูลนักเรียนลงทะเบียนในระบบกูเกิลชีต")
 
         st.markdown("---")
         st.subheader("📊 ตารางสรุปรายชื่อผู้กระทำผิดกฎระเบียบจราจร")
@@ -176,10 +155,9 @@ with tab2:
             summary_violation_df = pd.merge(violation_counts, df_for_merge, on="Sticker_No", how="left")
             summary_violation_df = summary_violation_df[["Sticker_No", "Name", "Level", "Department", "Plate_No", "จำนวนครั้งที่ทำผิดสะสม"]]
             
-            st.caption("💡 แถบสีแดงไฮไลต์ = ผู้ทำผิดกฎสะสมวิกฤตตั้งแต่ 3 ครั้งขึ้นไป (เจ้าหน้าที่เตรียมส่งรายชื่อเข้าแอปใหญ่ได้เลย)")
+            st.caption("💡 แถบสีแดงไฮไลต์ = ผู้ทำผิดกฎสะสมวิกฤตตั้งแต่ 3 ครั้งขึ้นไป")
             st.dataframe(summary_violation_df.style.map(highlight_violations, subset=["จำนวนครั้งที่ทำผิดสะสม"]))
 
-            # --- ใหม่! แสดงตารางประวัติการแจ้งเหตุแบบละเอียดเพื่อเช็คชื่อครูผู้รายงานได้ ---
             st.subheader("📜 ประวัติบันทึกการแจ้งเหตุโดยละเอียด")
             st.dataframe(df_inc[["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name"]])
 
@@ -189,15 +167,20 @@ with tab2:
             student_list = df.apply(lambda row: f"{row['Student_ID']} - {row['Name']} ({row['Sticker_No']})", axis=1).tolist()
             selected_student = st.selectbox("เลือกนักเรียนที่ต้องการตรวจสอบเพื่ออกหมายเลข", student_list)
             selected_id = selected_student.split(" - ")[0]
+            
             student_row = df[df["Student_ID"].astype(str) == selected_id].iloc[0]
             student_index = df[df["Student_ID"].astype(str) == selected_id].index[0]
             
             st.write(f"**ระดับชั้น:** {student_row['Level']} | **แผนกวิชา:** {student_row['Department']}")
             col_show1, col_show2 = st.columns(2)
             with col_show1:
-                if os.path.exists(str(student_row['Student_Img'])): st.image(student_row['Student_Img'], caption="รูปนักเรียน", use_container_width=True)
+                if os.path.exists(str(student_row['Student_Img'])): 
+                    st.image(student_row['Student_Img'], caption="รูปนักเรียน", use_container_width=True)
+                else: st.caption("💡 รูปถ่ายนักเรียนบันทึกอยู่ในคลาวด์ สามารถเปิดเช็คตรงใน Google Sheet ของอาจารย์ได้เลยครับ")
             with col_show2:
-                if os.path.exists(str(student_row['Moto_Img'])): st.image(student_row['Moto_Img'], caption="รูปรถ", use_container_width=True)
+                if os.path.exists(str(student_row['Moto_Img'])): 
+                    st.image(student_row['Moto_Img'], caption="รูปรถ", use_container_width=True)
+                else: st.caption("💡 รูปรถยนต์บันทึกอยู่ในคลาวด์")
             
             current_sticker = student_row['Sticker_No']
             new_sticker_no = st.text_input("ระบุหมายเลขสติ๊กเกอร์ที่ออกให้", value="" if current_sticker == "รออนุมัติ" else current_sticker)
@@ -205,18 +188,15 @@ with tab2:
                 if new_sticker_no.strip() == "": st.error("กรุณากรอกหมายเลขสติ๊กเกอร์")
                 else:
                     df.at[student_index, 'Sticker_No'] = new_sticker_no.strip()
-                    df.to_excel(DATA_FILE, index=False)
-                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์สำเร็จ!")
+                    url = st.secrets["sheets"]["registration_url"]
+                    conn.update(spreadsheet=url, data=df)
+                    st.success(f"อัปเดตหมายเลขสติ๊กเกอร์ลง Google Sheets สำเร็จ!")
                     st.rerun()
-        st.markdown("---")
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "rb") as f: st.download_button("📥 ดาวน์โหลดไฟล์ Excel ทะเบียนรถทั้งหมด", f, file_name="Motorcycle_Data_Chaiyaphum.xlsx")
-        if os.path.exists(INCIDENT_FILE):
-            with open(INCIDENT_FILE, "rb") as f: st.download_button("📥 ดาวน์โหลดไฟล์ Excel ประวัติทำผิดกฎทั้งหมด", f, file_name="Violation_Data.xlsx")
+
     elif pwd: st.error("รหัสผ่านไม่ถูกต้อง")
 
 # ==========================================
-# TAB 3: ระบบรายงานทำผิดกฎ (เพิ่มช่องชื่อครูผู้รายงาน)
+# TAB 3: ระบบรายงานทำผิดกฎ
 # ==========================================
 with tab3:
     st.header("🚨 ศูนย์รายงานการทำผิดกฎระเบียบจราจร")
@@ -224,17 +204,15 @@ with tab3:
     
     df_reg = load_data()
     if df_reg.empty:
-        st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบ ทันทีที่มีการออกสติ๊กเกอร์ ระบบรายงานผลจะเปิดให้ใช้งานครับ")
+        st.warning("⚠️ ยังไม่มีข้อมูลสติ๊กเกอร์ในระบบกูเกิลชีต")
     else:
         valid_stickers = df_reg[df_reg["Sticker_No"] != "รออนุมัติ"]["Sticker_No"].astype(str).unique().tolist()
         
         if not valid_stickers:
-            st.warning("⚠️ ยังไม่มีหมายเลขสติ๊กเกอร์ที่ผ่านการอนุมัติในระบบ (ครูต้องไปกดอนุมัติออกเลขสติ๊กเกอร์ใน TAB 2 ก่อนครับ)")
+            st.warning("⚠️ ยังไม่มีหมายเลขสติ๊กเกอร์ที่ผ่านการอนุมัติในระบบ")
         else:
             with st.form("incident_form", clear_on_submit=True):
-                # 🌟 เพิ่มกล่องกรอกชื่อครูผู้พบเห็นเหตุการณ์
                 reporter_name = st.text_input("✍️ ชื่อ-นามสกุล ของอาจารย์ผู้รายงานความผิด")
-                
                 target_sticker = st.selectbox("🎯 เลือกหมายเลขสติ๊กเกอร์ที่ทำผิดกฎ", valid_stickers)
                 violation_type = st.selectbox("⚠️ ข้อหาความผิด", [
                     "จอดรถในพื้นที่ห้ามจอด / จอดไม่เป็นระเบียบ",
@@ -243,7 +221,7 @@ with tab3:
                     "ดัดแปลงสภาพรถ / ท่อไอเสียเสียงดังเกินเกณฑ์",
                     "อื่นๆ (โปรดระบุในช่องคำอธิบาย)"
                 ])
-                details = st.text_area("📝 คำอธิบายเพิ่มเติม (เช่น สถานที่เกิดเหตุ, พฤติกรรม)")
+                details = st.text_area("📝 คำอธิบายเพิ่มเติม")
                 
                 col_up1, col_up2 = st.columns(2)
                 img_stick = col_up1.file_uploader("📸 1. รูปถ่ายให้เห็นเลขสติ๊กเกอร์ชัดเจน", type=["jpg", "png", "jpeg"])
@@ -258,12 +236,11 @@ with tab3:
                         ts_now = datetime.now()
                         ts_str = ts_now.strftime("%Y%m%d_%H%M%S")
                         
-                        p_stick = f"{INCIDENT_IMG_FOLDER}/{target_sticker}_STICKER_{ts_str}.{img_stick.name.split('.')[-1]}"
+                        p_stick = f"images_incidents/{target_sticker}_STICKER_{ts_str}.{img_stick.name.split('.')[-1]}"
                         with open(p_stick, "wb") as f: f.write(img_stick.getbuffer())
-                        p_over = f"{INCIDENT_IMG_FOLDER}/{target_sticker}_OVERVIEW_{ts_str}.{img_over.name.split('.')[-1]}"
+                        p_over = f"images_incidents/{target_sticker}_OVERVIEW_{ts_str}.{img_over.name.split('.')[-1]}"
                         with open(p_over, "wb") as f: f.write(img_over.getbuffer())
                         
-                        # บันทึกข้อมูลรวมถึงชื่อครูผู้รายงานลง Excel
                         incident_dict = {
                             "Timestamp": ts_now.strftime("%Y-%m-%d %H:%M:%S"),
                             "Sticker_No": target_sticker, "Violation_Type": violation_type,
@@ -273,26 +250,16 @@ with tab3:
                         save_incident(incident_dict)
                         
                         stud_info = df_reg[df_reg["Sticker_No"].astype(str) == str(target_sticker)].iloc[0]
-                        
                         df_inc = load_incident_data()
                         count_violation = len(df_inc[df_inc["Sticker_No"].astype(str) == str(target_sticker)])
                         
-                        st.subheader("📊 ผลการบันทึกข้อมูล")
+                        st.subheader("📊 ผลการบันทึกข้อมูลสำเร็จ")
                         st.write(f"**ชื่อผู้ทำผิด:** {stud_info['Name']} ({stud_info['Level']})")
-                        st.write(f"**ครูผู้แจ้งเหตุ:** {reporter_name.strip()}")
                         
                         if count_violation >= 3:
-                            st.error(f"""
-                            ### 🚨 🚨 แจ้งเตือนด่วนที่สุด! (ทำผิดสะสมครบเงื่อนไข)
-                            - **สติ๊กเกอร์หมายเลข:** {target_sticker} 
-                            - **นักศึกษา:** {stud_info['Name']} ชั้น {stud_info['Level']}
-                            - **📊 ประวัติทำผิดกฎระเบียบสะสมรวม:** {count_violation} ครั้ง !!
-                            - **ผู้รายงานล่าสุด:** {reporter_name.strip()}
-                            
-                            **⚠️ ข้อปฏิบัติสำหรับเจ้าหน้าที่:** ระบบทำไฮไลต์แถบสีแดงในหน้างานปกครองแล้ว เจ้าหน้าที่สามารถคัดลอกรายชื่อนี้ไปคีย์เพื่อหักแต้มในแอปใหญ่ความประพฤติวิทยาลัยต่อไปได้เลยครับ
-                            """)
+                            st.error(f"⚠️ **สติ๊กเกอร์หมายเลข {target_sticker} ทำผิดสะสมครบ {count_violation} ครั้งแล้ว!**")
                         else:
-                            st.success(f"🎉 บันทึกประวัติสำเร็จ! โดยอาจารย์ {reporter_name.strip()} (ทำผิดสะสมครั้งที่ {count_violation})")
+                            st.success(f"🎉 บันทึกประวัติลง Google Sheet สำเร็จ! (ทำผิดสะสมครั้งที่ {count_violation})")
                         st.balloons()
                     else:
-                        st.error("กรุณาอัปโหลดรูปภาพให้ครบทั้ง 2 รูป (รูปสติ๊กเกอร์ และรูปพื้นที่โดยรวม)")
+                        st.error("กรุณาอัปโหลดรูปภาพให้ครบทั้ง 2 รูป")
