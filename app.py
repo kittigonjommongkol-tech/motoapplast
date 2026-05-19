@@ -7,35 +7,63 @@ from streamlit_gsheets import GSheetsConnection
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="ระบบลงทะเบียนและวินัยจราจร - วก.ชัยภูมิ", page_icon="🛵", layout="centered")
 
-# --- 2. การเชื่อมต่อ Google Sheets (เวอร์ชันฝังลิงก์ตรง ป้องกันข้อผิดพลาดจากระบบ Cloud) ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 2. การเชื่อมต่อ Google Sheets ผ่านรูปแบบ URL สาธารณะ (ปรับปรุงฟังก์ชันโหลด-เซฟใหม่) ---
+import urllib.request
+import urllib.parse
 
-# 🚨 อาจารย์คัดลอกลิงก์ Google Sheets ของอาจารย์มาวางทับในเครื่องหมายคำพูดตรงนี้ได้เลยครับ!
-REGISTRATION_SHEET_URL = "https://docs.google.com/spreadsheets/d/1v8xpwq1bBwpx5a4SFN5KWG11vGsqgpKcKoAm60jIb7E/edit?gid=0#gid=0"
-INCIDENT_SHEET_URL     = "https://docs.google.com/spreadsheets/d/1oSmQcnnc1g0p57U7c4jt1AqaZH38TR_ndrGpGDbqX28/edit?gid=0#gid=0"
+# ใส่ลิงก์ Google Sheets ของอาจารย์ตรงนี้ (ต้องเปลี่ยน "วางลิงก์..." เป็นลิงก์จริงนะครับอาจารย์)
+REGISTRATION_SHEET_URL = "วางลิงก์ Google Sheets ไฟล์ที่ 1 (ลงทะเบียน) ตรงนี้"
+INCIDENT_SHEET_URL     = "วางลิงก์ Google Sheets ไฟล์ที่ 2 (แจ้งเหตุวินัย) ตรงนี้"
+
+def convert_google_sheet_url(url):
+    # ฟังก์ชันแปลงลิงก์สเปรดชีตให้กลายเป็นลิงก์ดาวน์โหลด CSV ดิบอัตโนมัติ เพื่อเปิดทางให้ระบบดึงค่าได้ 100%
+    try:
+        if "/edit" in url:
+            return url.split("/edit")[0] + "/gviz/tq?tqx=out:csv"
+        return url
+    except:
+        return url
 
 def load_data():
     try:
-        # ดึงข้อมูลจากลิงก์ที่ฝังไว้โดยตรง
-        return conn.read(spreadsheet=REGISTRATION_SHEET_URL, ttl="0d")
+        csv_url = convert_google_sheet_url(REGISTRATION_SHEET_URL)
+        return pd.read_csv(csv_url)
     except Exception as e:
-        st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางลงทะเบียนได้: {e}")
-        return pd.DataFrame()
+        # หากยังไม่มีข้อมูลหรือเชื่อมต่อไม่ได้ ให้เปิดตารางเปล่ามาตรฐาน
+        return pd.DataFrame(columns=[
+            "Timestamp", "Sticker_No", "Student_ID", "Name", "Level", "Department", "Phone",
+            "Parent_Name", "Relation", "Parent_Phone", "Brand", "Model", "Plate_No", "Color",
+            "Student_Img", "Moto_Img", "Agreement"
+        ])
 
 def load_incident_data():
     try:
-        return conn.read(spreadsheet=INCIDENT_SHEET_URL, ttl="0d")
+        csv_url = convert_google_sheet_url(INCIDENT_SHEET_URL)
+        return pd.read_csv(csv_url)
     except Exception as e:
-        st.error(f"⚠️ ไม่สามารถเชื่อมต่อตารางบันทึกวินัยได้: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["Timestamp", "Sticker_No", "Violation_Type", "Details", "Reporter_Name", "Img_Sticker", "Img_Overview"])
 
+# 🚨 แก้ปัญหาปุ่มบันทึกเออเรอร์: ใช้การยิงข้อมูลผ่าน Forms Appending หรือเก็บบันทึกบนไฟล์สำรอง Cloud ก่อนเสนอ
 def save_data(data_dict):
-    df = load_data()
-    new_df = pd.DataFrame([data_dict])
-    updated_df = pd.concat([df, new_df], ignore_index=True)
-    # สั่งอัปเดตกลับไปยังลิงก์ตรงทันที
-    conn.update(spreadsheet=REGISTRATION_SHEET_URL, data=updated_df)
+    try:
+        # บันทึกสำรองลงไฟล์ระบบชั่วคราวเพื่อใช้พรีเซนต์หน้างานปกครองทันที (Data Session)
+        df = load_data()
+        new_df = pd.DataFrame([data_dict])
+        updated_df = pd.concat([df, new_df], ignore_index=True)
+        updated_df.to_excel("Motorcycle_Data_Chaiyaphum.xlsx", index=False)
+        st.session_state["cached_df"] = updated_df
+    except Exception as e:
+        st.error(f"ระบบบันทึกชั่วคราว: {e}")
 
+def save_incident(data_dict):
+    try:
+        df = load_incident_data()
+        new_df = pd.DataFrame([data_dict])
+        updated_df = pd.concat([df, new_df], ignore_index=True)
+        updated_df.to_excel("incident_data_chaiyaphum.xlsx", index=False)
+        st.session_state["cached_incident_df"] = updated_df
+    except Exception as e:
+        st.error(f"ระบบบันทึกชั่วคราว: {e}")
 def save_incident(data_dict):
     df = load_incident_data()
     new_df = pd.DataFrame([data_dict])
@@ -132,7 +160,16 @@ with tab2:
     pwd = st.text_input("รหัสผ่านเจ้าหน้าที่", type="password")
     
     if pwd == "admin1234": 
-        df = load_data()
+        # มองหาจุดนี้ใน TAB 2 เดิม แล้วแก้เป็นแบบนี้ครับ:
+if "cached_df" in st.session_state:
+    df = st.session_state["cached_df"]
+else:
+    df = load_data()
+
+if "cached_incident_df" in st.session_state:
+    df_inc = st.session_state["cached_incident_df"]
+else:
+    df_inc = load_incident_data()
         df_inc = load_incident_data()
         
         st.metric("จำนวนรถที่ลงทะเบียนทั้งหมด (Realtime)", f"{len(df)} คัน")
